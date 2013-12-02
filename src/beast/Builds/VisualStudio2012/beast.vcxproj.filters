@@ -297,6 +297,9 @@
     <Filter Include="beast\crypto\impl\sha2">
       <UniqueIdentifier>{44489531-f44a-439a-a6ea-d32c252b1e8b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="beast\net\detail">
+      <UniqueIdentifier>{3e0822cb-8e67-428b-8413-bc0e2dac6909}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\modules\beast_core\beast_core.h">
@@ -1245,6 +1248,18 @@
     <ClInclude Include="..\..\beast\asio\io_latency_probe.h">
       <Filter>beast\asio</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\beast\net\IPAddressV4.h">
+      <Filter>beast\net</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\beast\net\detail\Parse.h">
+      <Filter>beast\net\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\beast\net\IPAddressV6.h">
+      <Filter>beast\net</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\beast\net\IPEndpoint.h">
+      <Filter>beast\net</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\modules\beast_core\containers\DynamicObject.cpp">
@@ -1794,7 +1809,16 @@
       <Filter>beast\insight\impl</Filter>
     </ClCompile>
     <ClCompile Include="..\..\beast\insight\impl\Hook.cpp">
-      <Filter>beast\insight\impl</Filter>
+      <Filter>beast\insight\impl</Filter>    
+    </ClCompile>
+    <ClCompile Include="..\..\beast\net\impl\IPAddressV4.cpp">
+      <Filter>beast\net\impl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\beast\net\impl\IPAddressV6.cpp">
+      <Filter>beast\net\impl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\beast\net\impl\IPEndpoint.cpp">
+      <Filter>beast\net\impl</Filter>
     </ClCompile>
     <ClCompile Include="..\..\beast\chrono\impl\abstract_clock.cpp">
       <Filter>beast\chrono\impl</Filter>
