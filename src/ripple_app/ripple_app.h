@@ -53,6 +53,8 @@
 #include "../ripple_data/ripple_data.h"
 #include "../ripple_net/ripple_net.h"
 
+#include "../ripple/common/net/ResolverAsio.h"
+
 //#include "beast/modules/beast_sqdb/beast_sqdb.h"
 #include "beast/modules/beast_sqlite/beast_sqlite.h"
 

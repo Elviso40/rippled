@@ -752,7 +752,9 @@ Json::Value RPCHandler::doBlackList (Json::Value params, Resource::Charge& loadT
 //   port: <number>
 // }
 // XXX Might allow domain for manual connections.
-Json::Value RPCHandler::doConnect (Json::Value params, Resource::Charge& loadType, Application::ScopedLockType& masterLockHolder)
+Json::Value RPCHandler::doConnect (Json::Value params,
+                                   Resource::Charge& loadType,
+                                   Application::ScopedLockType& masterLockHolder)
 {
     if (getConfig ().RUN_STANDALONE)
         return "cannot connect in standalone mode";
@@ -760,11 +762,20 @@ Json::Value RPCHandler::doConnect (Json::Value params, Resource::Charge& loadTyp
     if (!params.isMember ("ip"))
         return rpcError (rpcINVALID_PARAMS);
 
-    std::string strIp   = params["ip"].asString ();
-    int         iPort   = params.isMember ("port") ? params["port"].asInt () : -1;
+    if (params.isMember ("port") && !params["port"].isConvertibleTo (Json::intValue))
+        return rpcError (rpcINVALID_PARAMS);
 
-    // XXX Validate legal IP and port
-    getApp().getPeers ().connectTo (strIp, iPort);
+    int iPort;
+
+    if(params.isMember ("port"))
+        iPort = params["port"].asInt ();
+    else
+        iPort = SYSTEM_PEER_PORT;
+
+    IPAddress ip (IPAddress::from_string(params["ip"].asString ()));
+
+    if (! is_unspecified (ip))
+        getApp().getPeers ().connect (ip.at_port(iPort));
 
     return "connecting";
 }
@@ -913,7 +924,7 @@ Json::Value RPCHandler::doPeers (Json::Value, Resource::Charge& loadType, Applic
 {
     Json::Value jvResult (Json::objectValue);
 
-    jvResult["peers"]   = getApp().getPeers ().getPeersJson ();
+    jvResult["peers"]   = getApp().getPeers ().json ();
 
     getApp().getUNL().addClusterStatus(jvResult);
 

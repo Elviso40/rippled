@@ -22,3 +22,14 @@
 #include "../../beast/modules/beast_core/beast_core.h" // for UnitTest
 
 #include "functional/impl/counted_bind.cpp"
+
+using namespace beast;
+
+#ifndef NDEBUG
+# define consistency_check(cond) bassert(cond)
+#else
+# define consistency_check(cond)
+#endif
+
+#include "net/ResolverAsio.h"
+#include "net/impl/ResolverAsio.cpp"

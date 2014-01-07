@@ -26,59 +26,377 @@ namespace PeerFinder {
 class Slots
 {
 public:
-    explicit Slots (
-        DiscreteClock <DiscreteTime> clock,
-        bool roundUpwards = Random::getSystemRandom().nextBool());
+    explicit Slots (DiscreteClock <DiscreteTime> clock)
+        : m_clock (clock)
+        , m_inboundSlots (0)
+        , m_inboundActive (0)
+        , m_outboundSlots (0)
+        , m_outboundActive (0)
 
-    void update (Config const& config);
-    void addPeer (Config const& config, bool inbound);
-    void dropPeer (Config const& config, bool inbound);
+        , m_fixedPeerConnections (0)
+        , m_acceptCount (0)
+        , m_connectCount (0)
+        , m_closingCount (0)
+    {
+#if 0
+        std::random_device rd;
+        std::mt19937 gen (rd());
+        m_roundingThreshold =
+            std::generate_canonical <double, 10> (gen);
+#else
+        m_roundingThreshold = Random::getSystemRandom().nextDouble();
+#endif
+    }
 
-    // Current total of connected peers that have HELLOed
-    int peerCount;
+    /** Called when the config is set or changed. */
+    void onConfig (Config const& config)
+    {
+        // Calculate the number of outbound peers we want. If we dont want or can't
+        // accept incoming, this will simply be equal to maxPeers. Otherwise
+        // we calculate a fractional amount based on percentages and pseudo-randomly
+        // round up or down.
+        //
+        if (config.wantIncoming)
+        {
+            // Round outPeers upwards using a Bernoulli distribution
+            m_outboundSlots = std::floor (config.outPeers);
+            if (m_roundingThreshold < (config.outPeers - m_outboundSlots))
+                ++m_outboundSlots;
+        }
+        else
+        {
+            m_outboundSlots = config.maxPeers;
+        }
 
-    // The portion of peers which are incoming connections
-    int inboundCount;
+        // Calculate the largest number of inbound connections we could take.
+        if (config.maxPeers >= m_outboundSlots)
+            m_inboundSlots = config.maxPeers - m_outboundSlots;
+        else
+            m_inboundSlots = 0;
+    }
 
-    // The portion of peers which are outgoing connections
-    int outboundCount;
+    /** Returns the number of accepted connections that haven't handshaked. */
+    int acceptCount() const
+    {
+        return m_acceptCount;
+    }
 
-    // The portion of peers which are the fixed peers.
-    // Fixed peers don't count towards connection limits.
-    int fixedCount;
+    /** Returns the number of connection attempts currently active. */
+    int connectCount() const
+    {
+        return m_connectCount;
+    }
 
-    // The number of outgoing peer connections we want (calculated)
-    int outDesired;
+    /** Returns the number of connections that are gracefully closing. */
+    int closingCount () const
+    {
+        return m_closingCount;
+    }
 
-    // The number of available incoming slots (calculated)
-    int inboundSlots;
+    /** Returns the total number of inbound slots. */
+    int inboundSlots () const
+    {
+        return m_inboundSlots;
+    }
 
-    // The maximum number of incoming slots (calculated)
-    int inboundSlotsMaximum;
+    /** Returns the total number of outbound slots. */
+    int outboundSlots () const
+    {
+        return m_outboundSlots;
+    }
 
-    // Returns `true` if we round fractional slot availability upwards
-    bool roundUpwards () const;
+    /** Returns the number of inbound peers assigned an open slot. */
+    int inboundActive () const
+    {
+        return m_inboundActive;
+    }
 
-    // Returns `true` if we meet the criteria of
-    // "connected to the network based on the current values of slots.
-    //
-    bool connected () const;
+    /** Returns the number of outbound peers assigned an open slot.
+        Fixed peers do not count towards outbound slots used.
+    */
+    int outboundActive () const
+    {
+        return m_outboundActive;
+    }
 
-    // Returns the uptime in seconds
-    // Uptime is measured from the last we transitioned from not
-    // being connected to the network, to being connected.
-    //
-    uint32 uptimeSeconds () const;
+    /** Returns the total number of active peers excluding fixed peers. */
+    int totalActive () const
+    {
+        return m_inboundActive + m_outboundActive;
+    }
 
-    // Output statistics
-    void onWrite (PropertyStream::Map& map);
+    /** Returns the number of unused inbound slots.
+        Fixed peers do not deduct from inbound slots or count towards totals.
+    */
+    int inboundSlotsFree () const
+    {
+        if (m_inboundActive < m_inboundSlots)
+            return m_inboundSlots - m_inboundActive;
+        return 0;
+    }
+
+    /** Returns the number of unused outbound slots.
+        Fixed peers do not deduct from outbound slots or count towards totals.
+    */
+    int outboundSlotsFree () const
+    {
+        if (m_outboundActive < m_outboundSlots)
+            return m_outboundSlots - m_outboundActive;
+        return 0;
+    }
+
+    /** Returns the number of fixed peers we have connections to
+        Fixed peers do not deduct from outbound or inbound slots or count 
+        towards totals.
+    */
+    int fixedPeers() const
+    {
+        return m_fixedPeerConnections;
+    }
+
+    //--------------------------------------------------------------------------
+
+    /** Called when an inbound connection is accepted. */
+    void onPeerAccept ()
+    {
+        ++m_acceptCount;
+    }
+
+    /** Called when a new outbound connection is attempted. */
+    void onPeerConnect ()
+    {
+        ++m_connectCount;
+    }
+
+    /** Determines if an outbound slot is available and assigns it */
+    HandshakeAction grabOutboundSlot(bool self, bool fixed, bool available)
+    {
+        // If this is a connection to ourselves, we bail.
+        if (self)
+        {
+            ++m_closingCount;
+            return doClose;
+        }
+
+        // If we don't have any slots and this isn't a fixed peer, reject it
+        if (!available && !fixed)
+        {
+            ++m_closingCount;
+            return doClose;
+        }
+
+        // Fixed peer connections are tracked but don't count towards slots
+        if (fixed)
+            ++m_fixedPeerConnections;
+        else
+            ++m_outboundActive;
+
+        return doActivate;
+    }
+
+    /** Determines if an inbound slot is available and assigns it */
+    HandshakeAction grabInboundSlot(bool self, bool fixed, bool available)
+    {
+        // If this is a connection to ourselves, we bail.
+        if (self)
+        {
+            ++m_closingCount;
+            return doClose;
+        }
+
+        // If we don't have any slots and this isn't a fixed peer, reject it
+        if (!available && !fixed)
+        {
+            ++m_closingCount;
+            return doRedirect;
+        }
+
+        // Fixed peer connections are tracked but don't count towards slots
+        if (fixed)
+            ++m_fixedPeerConnections;
+        else
+            ++m_inboundActive;
+
+        return doActivate;
+    }
+
+    /** Called when a peer handshakes.
+        Returns the disposition for this peer, including whether we should
+        activate the connection, issue a redirect or simply close it.
+    */
+    HandshakeAction onPeerHandshake (bool inbound, bool self, bool fixed)
+    {
+        if (inbound)
+        {
+            // Must not be zero!
+            consistency_check (m_acceptCount > 0);
+            --m_acceptCount;
+
+            return grabInboundSlot (self, fixed, inboundSlotsFree () > 0);
+        }
+
+        // Must not be zero!
+        consistency_check (m_connectCount > 0);
+        --m_connectCount;
+
+        return grabOutboundSlot (self, fixed, outboundSlotsFree () > 0);
+    }
+
+    /** Called when a peer socket is closed gracefully. */
+    void onPeerGracefulClose ()
+    {
+        // Must not be zero!
+        consistency_check (m_closingCount > 0);
+        --m_closingCount;
+    }
+
+    /** Called when a peer socket is closed.
+        A value of `true` for active means the peer was assigned an open slot.
+    */
+    void onPeerClosed (bool inbound, bool active, bool fixed)
+    {
+        if (active)
+        {
+            if (inbound)
+            {
+                // Fixed peer connections are tracked but don't count towards slots
+                if (fixed)
+                {
+                    consistency_check (m_fixedPeerConnections > 0);
+                    --m_fixedPeerConnections;
+                }
+                else
+                {
+                    // Must not be zero!
+                    consistency_check (m_inboundActive > 0);
+                    --m_inboundActive;
+                }
+            }
+            else
+            {
+                // Fixed peer connections are tracked but don't count towards slots
+                if (fixed)
+                {
+                    consistency_check (m_fixedPeerConnections > 0);
+                    --m_fixedPeerConnections;
+                }
+                else
+                {
+                    // Must not be zero!
+                    consistency_check (m_outboundActive > 0);
+                    --m_outboundActive;
+                }
+            }
+        }
+        else if (inbound)
+        {
+            // Must not be zero!
+            consistency_check (m_acceptCount > 0);
+            --m_acceptCount;
+        }
+        else
+        {
+            // Must not be zero!
+            consistency_check (m_connectCount > 0);
+            --m_connectCount;
+        }
+    }
+
+    //--------------------------------------------------------------------------
+
+    /** Returns the number of new connection attempts we should make. */
+    int additionalAttemptsNeeded () const
+    {
+        // Don't go over the maximum concurrent attempt limit
+        if (m_connectCount >= Tuning::maxConnectAttempts)
+            return 0;
+        int needed (outboundSlotsFree ());
+        // This is the most we could attempt right now
+        int const available (
+            Tuning::maxConnectAttempts - m_connectCount);
+        return std::min (needed, available);
+    }
+
+    /** Returns true if the slot logic considers us "connected" to the network. */
+    bool isConnectedToNetwork () const
+    {
+        // We will consider ourselves connected if we have reached
+        // the number of outgoing connections desired, or if connect
+        // automatically is false.
+        //
+        // Fixed peers do not count towards the active outgoing total.
+
+        if (m_outboundSlots > 0)
+            return false;
+
+        return true;
+    }
+
+    /** Output statistics. */
+    void onWrite (PropertyStream::Map& map)
+    {
+        map ["accept"]  = acceptCount();
+        map ["connect"] = connectCount();
+        map ["close"]   = closingCount();
+        map ["in"]      << inboundActive() << "/" << inboundSlots();
+        map ["out"]     << outboundActive() << "/" << outboundSlots();
+        map ["fixed"]   = fixedPeers();
+    }
+
+    /** Records the state for diagnostics. */
+    std::string state_string () const
+    {
+        std::stringstream ss;
+        ss <<
+            outboundActive() << "/" << outboundSlots() << " out, " <<
+            inboundActive() << "/" << inboundSlots() << " in, " <<
+            connectCount() << " connecting, " <<
+            closingCount() << " closing"
+            ;
+        return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
 
 private:
-    void updateConnected();
-
     DiscreteClock <DiscreteTime> m_clock;
-    DiscreteTime m_startTime;
-    bool m_roundUpwards;
+
+    /** Total number of inbound slots. */
+    int m_inboundSlots;
+
+    /** Number of inbound slots assigned to active peers. */
+    int m_inboundActive;
+
+    /** Total number of outbound slots. */
+    int m_outboundSlots;
+
+    /** Number of outbound slots assigned to active peers. */
+    int m_outboundActive;
+
+    /** Number of fixed peer connections that we have. */
+    int m_fixedPeerConnections;
+
+    // Number of inbound connections that are
+    // not active or gracefully closing.
+    int m_acceptCount;
+
+    // Number of outgoing connections that are
+    // not active or gracefully closing.
+    //
+    int m_connectCount;
+
+    // Number of connections that are gracefully closing.
+    int m_closingCount;
+
+    // Number of connections that are currently assigned an open slot
+    //int m_activeCount;
+
+    /** Fractional threshold below which we round down.
+        This is used to round the value of Config::outPeers up or down in
+        such a way that the network-wide average number of outgoing
+        connections approximates the recommended, fractional value.
+    */
+    double m_roundingThreshold;
 };
 
 }

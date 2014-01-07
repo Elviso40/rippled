@@ -288,8 +288,7 @@ public:
         return SHAMap::pointer ();
     }
 
-    /** We have a complete transaction set, 
-        typically one acuired from the network
+    /** We have a complete transaction set, typically acquired from the network
     */
     void mapComplete (uint256 const& hash, SHAMap::ref map, bool acquired)
     {
@@ -969,11 +968,11 @@ private:
                 Blob validation = v->getSigned ();
                 protocol::TMValidation val;
                 val.set_validation (&validation[0], validation.size ());
-                int j = getApp().getPeers ().relayMessage (NULL,
-                    boost::make_shared<PackedMessage> 
-                    (val, protocol::mtVALIDATION));
+                getApp ().getPeers ().foreach (send_always (
+                    boost::make_shared <PackedMessage> (
+                        val, protocol::mtVALIDATION)));
                 WriteLog (lsINFO, LedgerConsensus) 
-                    << "CNF Val " << newLCLHash << " to " << j << " peers";
+                    << "CNF Val " << newLCLHash;
             }
             else
                 WriteLog (lsINFO, LedgerConsensus) 
@@ -1090,26 +1089,30 @@ private:
             }
         }
 
-        std::vector<Peer::pointer> peerList 
-            = getApp().getPeers ().getPeerVector ();
-        BOOST_FOREACH (Peer::ref peer, peerList)
+        struct build_acquire_list
         {
-            if (peer->hasTxSet (acquire->getHash ()))
-                acquire->peerHas (peer);
-        }
+            typedef void return_type;
+
+            TransactionAcquire::pointer const& acquire;
+
+            build_acquire_list (TransactionAcquire::pointer const& acq)
+                : acquire(acq)
+            { }
+
+            return_type operator() (Peer::ref peer) const
+            {
+                if (peer->hasTxSet (acquire->getHash ()))
+                    acquire->peerHas (peer);
+            }
+        };
+
+        getApp().getPeers ().foreach (build_acquire_list (acquire));
 
         acquire->setTimer ();
     }
 
-
-
-
     // Where is this function?
     SHAMap::pointer find (uint256 const & hash);
-
-
-
-
 
     /** Compare two proposed transaction sets and create disputed
         transctions structures for any mismatches
@@ -1197,9 +1200,9 @@ private:
             msg.set_rawtransaction (& (tx.front ()), tx.size ());
             msg.set_status (protocol::tsNEW);
             msg.set_receivetimestamp (getApp().getOPs ().getNetworkTimeNC ());
-            PackedMessage::pointer packet = boost::make_shared<PackedMessage>
-                (msg, protocol::mtTRANSACTION);
-            getApp().getPeers ().relayMessage (NULL, packet);
+            getApp ().getPeers ().foreach (send_always (
+                boost::make_shared<PackedMessage> (
+                    msg, protocol::mtTRANSACTION)));
         }
     }
 
@@ -1236,9 +1239,9 @@ private:
         Blob sig = mOurPosition->sign ();
         prop.set_nodepubkey (&pubKey[0], pubKey.size ());
         prop.set_signature (&sig[0], sig.size ());
-        getApp().getPeers ().relayMessage (NULL,
-            boost::make_shared<PackedMessage> 
-            (prop, protocol::mtPROPOSE_LEDGER));
+        getApp ().getPeers ().foreach (send_always (
+            boost::make_shared<PackedMessage> (
+                prop, protocol::mtPROPOSE_LEDGER)));
     }
 
     /** Let peers know that we a particular transactions set so they
@@ -1249,9 +1252,9 @@ private:
         protocol::TMHaveTransactionSet msg;
         msg.set_hash (hash.begin (), 256 / 8);
         msg.set_status (direct ? protocol::tsHAVE : protocol::tsCAN_GET);
-        PackedMessage::pointer packet 
-            = boost::make_shared<PackedMessage> (msg, protocol::mtHAVE_SET);
-        getApp().getPeers ().relayMessage (NULL, packet);
+        getApp ().getPeers ().foreach (send_always (
+            boost::make_shared <PackedMessage> (
+                msg, protocol::mtHAVE_SET)));        
     }
 
     /** Apply a set of transactions to a ledger
@@ -1447,10 +1450,9 @@ private:
         }
         s.set_firstseq (uMin);
         s.set_lastseq (uMax);
-
-        PackedMessage::pointer packet 
-            = boost::make_shared<PackedMessage> (s, protocol::mtSTATUS_CHANGE);
-        getApp().getPeers ().relayMessage (NULL, packet);
+        getApp ().getPeers ().foreach (send_always (
+            boost::make_shared <PackedMessage> (
+                s, protocol::mtSTATUS_CHANGE)));
         WriteLog (lsTRACE, LedgerConsensus) << "send status change to peer";
     }
 
@@ -1731,7 +1733,7 @@ private:
 
     #if 0 
     // FIXME: We can't do delayed relay because we don't have the signature
-                std::set<uint64> peers
+                std::set<Peer::ShortId> peers
 
                 if (relay && getApp().getHashRouter ().swapSet (proposal.getSuppress (), set, SF_RELAYED))
                 {
@@ -1743,8 +1745,10 @@ private:
                     closetime
                     nodepubkey
                     signature
-                    PackedMessage::pointer message = boost::make_shared<PackedMessage> (set, protocol::mtPROPOSE_LEDGER);
-                    getApp().getPeers ().relayMessageBut (peers, message);
+                    getApp ().getPeers ().foreach (send_if_not (
+                        boost::make_shared<PackedMessage> (
+                            set, protocol::mtPROPOSE_LEDGER), 
+                                peer_in_set(peers)));
                 }
 
     #endif
@@ -1807,8 +1811,9 @@ private:
         protocol::TMValidation val;
         val.set_validation (&validation[0], validation.size ());
     #if 0
-        getApp().getPeers ().relayMessage (NULL,
-        boost::make_shared<PackedMessage> (val, protocol::mtVALIDATION));
+        getApp ().getPeers ().visit (RelayMessage (
+            boost::make_shared <PackedMessage> (
+                val, protocol::mtVALIDATION)));
     #endif
         getApp().getOPs ().setLastValidation (v);
         WriteLog (lsWARNING, LedgerConsensus) << "Sending partial validation";

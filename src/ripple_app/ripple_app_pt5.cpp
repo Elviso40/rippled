@@ -26,10 +26,9 @@
 #include "../ripple/resource/ripple_resource.h"
 #include "../ripple/validators/ripple_validators.h"
 
-#include <deque>
+#include "../ripple/common/net/ResolverAsio.h"
 
-#include "peers/NameResolver.h"
-#include "peers/NameResolver.cpp"
+#include <deque>
 
 namespace ripple {
 

@@ -80,11 +80,11 @@ public:
     Consumer newInboundEndpoint (IPAddress const& address)
     {
         if (isWhitelisted (address))
-            return newAdminEndpoint (address.to_string());
+            return newAdminEndpoint (to_string (address));
 
         Key key;
         key.kind = kindInbound;
-        key.address = address.withPort (0);
+        key.address = address.at_port (0);
 
         Entry* entry (nullptr);
 
@@ -113,7 +113,7 @@ public:
     Consumer newOutboundEndpoint (IPAddress const& address)
     {
         if (isWhitelisted (address))
-            return newAdminEndpoint (address.to_string());
+            return newAdminEndpoint (to_string (address));
 
         Key key;
         key.kind = kindOutbound;
@@ -346,7 +346,7 @@ public:
 
     bool isWhitelisted (IPAddress const& address)
     {
-        if (! address.isPublic())
+        if (! is_public (address))
             return true;
 
         return false;

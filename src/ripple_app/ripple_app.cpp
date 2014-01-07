@@ -87,6 +87,8 @@ namespace ripple {
 # include "websocket/WSDoor.h"
 #include "websocket/WSDoor.cpp"
 
+#include "../ripple/common/net/ResolverAsio.h"
+
 #include "main/Application.cpp"
 
 //

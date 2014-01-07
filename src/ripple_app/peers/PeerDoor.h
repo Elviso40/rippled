@@ -20,10 +20,6 @@
 #ifndef RIPPLE_PEERDOOR_H_INCLUDED
 #define RIPPLE_PEERDOOR_H_INCLUDED
 
-namespace Resource {
-class Manager;
-}
-
 /** Handles incoming connections from peers. */
 class PeerDoor : public Stoppable
 {
@@ -39,13 +35,9 @@ public:
         sslAndPROXYRequired
     };
 
-    static PeerDoor* New (Stoppable& parent,
-        Resource::Manager& resourceManager,
-            Kind kind, std::string const& ip, int port,
-                boost::asio::io_service& io_service,
-                    boost::asio::ssl::context& ssl_context);
-
-    //virtual boost::asio::ssl::context& getSSLContext () = 0;
+    static PeerDoor* New (Kind kind, Peers& peers,
+        std::string const& ip, int port,
+        boost::asio::io_service& io_service);
 };
 
 #endif
