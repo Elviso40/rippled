@@ -99,8 +99,11 @@ namespace ripple {
 #include "misc/IFeatures.h"
 #include "misc/IFeeVote.h"
 #include "misc/IHashRouter.h"
+}
+// escape the ripple namespace
 #include "peers/Peer.h"
 #include "peers/Peers.h"
+namespace ripple {
 #include "peers/ClusterNodeStatus.h"
 #include "peers/UniqueNodeList.h"
 #include "misc/Validations.h"

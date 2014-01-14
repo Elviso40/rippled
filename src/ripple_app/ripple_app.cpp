@@ -61,9 +61,6 @@ namespace ripple {
 # include "main/FatalErrorReporter.h"
 #include "main/FatalErrorReporter.cpp"
 
-# include "peers/PeerDoor.h"
-#include "peers/PeerDoor.cpp"
-
 # include "rpc/RPCHandler.h"
 #   include "misc/PowResult.h"
 #  include "misc/ProofOfWork.h"

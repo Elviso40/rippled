@@ -20,6 +20,8 @@
 #ifndef RIPPLE_PEER_H_INCLUDED
 #define RIPPLE_PEER_H_INCLUDED
 
+namespace ripple {
+
 typedef boost::asio::ip::tcp::socket NativeSocketType;
 
 namespace Resource {
@@ -156,5 +158,7 @@ std::ostream& operator<< (std::ostream& os, Peer const& peer);
 
 std::string to_string (Peer const* peer);
 std::ostream& operator<< (std::ostream& os, Peer const* peer);
+
+}
 
 #endif

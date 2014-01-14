@@ -644,7 +644,7 @@ public:
         //             if (!getConfig ().RUN_STANDALONE)
         m_peers.reset (add (Peers::New (m_mainIoPool, *m_resourceManager, 
             *m_siteFiles, *m_resolver, m_mainIoPool, 
-            m_peerSSLContext->get ())));
+                m_peerSSLContext->get ())));
 
         // SSL context used for WebSocket connections.
         if (getConfig ().WEBSOCKET_SECURE)

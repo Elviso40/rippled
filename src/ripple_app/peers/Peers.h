@@ -20,6 +20,8 @@
 #ifndef RIPPLE_PEERS_H_INCLUDED
 #define RIPPLE_PEERS_H_INCLUDED
 
+namespace ripple {
+
 namespace PeerFinder {
 struct Endpoint;
 class Manager;
@@ -32,6 +34,8 @@ class Manager;
 namespace SiteFiles {
 class Manager;
 }
+
+//------------------------------------------------------------------------------
 
 /** Manages the set of connected peers. */
 class Peers
@@ -65,6 +69,9 @@ public:
     // NIKB TODO This is an implementation detail - a private
     //           interface between Peers and Peer. It should
     //           be split out and moved elsewhere.
+    //
+    // VFALCO NOTE PeerImp should have visbility to PeersImp
+    //
     virtual void peerCreated (Peer* peer) = 0;
     virtual void peerDestroyed (Peer *peer) = 0;
 
@@ -88,9 +95,6 @@ public:
 
     virtual void addPeer (Peer::Ptr const& peer) = 0;
     virtual void removePeer (Peer::Ptr const& peer) = 0;
-
-    // Get a reference to PeerFinder
-    virtual PeerFinder::Manager &getPeerFinder() = 0;
 
     /** Visit every active peer and return a value
         The functor must:
@@ -159,6 +163,8 @@ struct send_always
     }
 };
 
+//------------------------------------------------------------------------------
+
 /** Sends a message to match peers */
 template <typename Predicate>
 struct send_if_pred
@@ -187,6 +193,8 @@ send_if_pred<Predicate> send_if (
 {
     return send_if_pred<Predicate>(m, f);
 }
+
+//------------------------------------------------------------------------------
 
 /** Sends a message to non-matching peers */
 template <typename Predicate>
@@ -217,6 +225,8 @@ send_if_not_pred<Predicate> send_if_not (
     return send_if_not_pred<Predicate>(m, f);
 }
 
+//------------------------------------------------------------------------------
+
 /** Select the specific peer */
 struct match_peer
 {
@@ -236,6 +246,8 @@ struct match_peer
         return false;
     }
 };
+
+//------------------------------------------------------------------------------
 
 /** Select all peers (except optional excluded) that are in our cluster */
 struct peer_in_cluster
@@ -258,6 +270,8 @@ struct peer_in_cluster
     }
 };
 
+//------------------------------------------------------------------------------
+
 /** Select all peers that are in the specified set */
 struct peer_in_set
 {
@@ -277,5 +291,7 @@ struct peer_in_set
         return true;
     }
 };
+
+}
 
 #endif

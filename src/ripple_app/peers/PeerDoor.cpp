@@ -17,6 +17,10 @@
 */
 //==============================================================================
 
+#include "PeerDoor.h"
+
+namespace ripple {
+
 SETUP_LOG (PeerDoor)
 
 class PeerDoorImp
@@ -153,3 +157,4 @@ PeerDoor* PeerDoor::New (
     return new PeerDoorImp (kind, peers, ep, io_service);
 }
 
+}

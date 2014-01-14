@@ -17,6 +17,8 @@
 */
 //==============================================================================
 
+namespace ripple {
+
 SETUP_LOG (Peer)
 
 class PeerImp;
@@ -59,6 +61,7 @@ class PeerImp
     : public Peer
     , public CountedObject <PeerImp>
 {
+private:
     /** Time alloted for a peer to send a HELLO message (DEPRECATED) */
     static const boost::posix_time::seconds nodeVerifySeconds;
 
@@ -2793,4 +2796,6 @@ std::ostream& operator<< (std::ostream& os, Peer const* peer)
     os << to_string (peer);
 
     return os;
+}
+
 }

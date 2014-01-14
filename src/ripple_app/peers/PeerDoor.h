@@ -20,6 +20,8 @@
 #ifndef RIPPLE_PEERDOOR_H_INCLUDED
 #define RIPPLE_PEERDOOR_H_INCLUDED
 
+namespace ripple {
+
 /** Handles incoming connections from peers. */
 class PeerDoor : public Stoppable
 {
@@ -39,5 +41,7 @@ public:
         std::string const& ip, int port,
         boost::asio::io_service& io_service);
 };
+
+}
 
 #endif

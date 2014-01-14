@@ -42,7 +42,9 @@ namespace ripple {
 #   include "misc/PowResult.h"
 #  include "misc/ProofOfWork.h"
 # include "misc/ProofOfWorkFactory.h"
-#include "peers/Peer.cpp"
 #include "peers/PackedMessage.cpp"
-#include "peers/Peers.cpp"
 }
+
+#include "peers/Peer.cpp"
+#include "peers/PeerDoor.cpp"
+#include "peers/Peers.cpp"

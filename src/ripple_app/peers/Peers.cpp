@@ -18,6 +18,11 @@
 //==============================================================================
 
 #include "PeerDoor.h"
+#include <boost/config.hpp>
+#include <condition_variable>
+#include <mutex>
+
+namespace ripple {
 
 class PeersLog;
 template <> char const* LogPartition::getPartitionName <PeersLog> () { return "Peers"; }
@@ -45,6 +50,7 @@ static static_call init_PeerFinderLog (&LogPartition::get <PeerFinderLog>);
 static static_call init_NameResolverLog (&LogPartition::get <NameResolverLog>);
 
 //------------------------------------------------------------------------------
+
 /** A functor to visit all active peers and retrieve their JSON data */
 struct get_peer_json
 {
@@ -82,9 +88,13 @@ public:
     typedef boost::unordered_map <
         Peer::ShortId, Peer::pointer> PeerByShortId;
 
-    typedef RippleRecursiveMutex LockType;
+    std::recursive_mutex m_mutex;
 
-    typedef LockType::ScopedLockType ScopedLockType;
+    // Blocks us until dependent objects have been destroyed
+    std::condition_variable_any m_cond;
+
+    // Number of dependencies that must be destroyed before we can stop
+    std::size_t m_child_count;
 
     Journal m_journal;
     Resource::Manager& m_resourceManager;
@@ -94,24 +104,17 @@ public:
     boost::asio::io_service& m_io_service;
     boost::asio::ssl::context& m_ssl_context;
 
-    struct State
-    {
-        /** Tracks peers by their IP address and port */
-        PeerByIP ipMap;
+    /** Tracks peers by their IP address and port */
+    PeerByIP m_ipMap;
 
-        /** Tracks peers by their public key */
-        PeerByPublicKey publicKeyMap;
+    /** Tracks peers by their public key */
+    PeerByPublicKey m_publicKeyMap;
 
-        /** Tracks peers by their session ID */
-        PeerByShortId shortIdMap;
+    /** Tracks peers by their session ID */
+    PeerByShortId m_shortIdMap;
 
-        /** Tracks all instances of peer objects */
-        List <Peer> list;
-    };
-
-    typedef SharedData <State> SharedState;
-
-    SharedState m_state;
+    /** Tracks all instances of peer objects */
+    List <Peer> m_list;
 
     /** The peer door for regular SSL connections */
     std::unique_ptr <PeerDoor> m_doorDirect;
@@ -138,6 +141,7 @@ public:
                     boost::asio::io_service& io_service,
                         boost::asio::ssl::context& ssl_context)
         : Peers (parent)
+        , m_child_count (1)
         , m_journal (LogPartition::getJournal <PeersLog> ())
         , m_resourceManager (resourceManager)
         , m_peerFinder (add (PeerFinder::Manager::New (
@@ -149,6 +153,22 @@ public:
         , m_ssl_context (ssl_context)
         , m_resolver (resolver)
     {
+
+    }
+
+    ~PeersImp ()
+    {
+        // Block until dependent objects have been destroyed.
+        // This is just to catch improper use of the Stoppable API.
+        //
+        std::unique_lock <decltype(m_mutex)> lock (m_mutex);
+#ifdef BOOST_NO_CXX11_LAMBDAS
+        while (m_child_count != 0)
+            m_cond.wait (lock);
+#else
+        m_cond.wait (lock, [this] {
+            return this->m_child_count == 0; });
+#endif
 
     }
 
@@ -177,16 +197,47 @@ public:
     }
 
     //--------------------------------------------------------------------------
+
+    // Check for the stopped condition
+    // Caller must hold the mutex
+    void check_stopped ()
+    {
+        // To be stopped, child Stoppable objects must be stopped
+        // and the count of dependent objects must be zero
+        if (areChildrenStopped () && m_child_count == 0)
+        {
+            m_cond.notify_all ();
+            stopped ();
+        }
+    }
+
+    // Increment the count of dependent objects
+    // Caller must hold the mutex
+    void addref ()
+    {
+        ++m_child_count;
+    }
+
+    // Decrement the count of dependent objects
+    // Caller must hold the mutex
+    void release ()
+    {
+        if (--m_child_count == 0)
+            check_stopped ();
+    }
+
     void peerCreated (Peer* peer)
     {
-        SharedState::Access state (m_state);
-        state->list.push_back (*peer);
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+        m_list.push_back (*peer);
+        addref();
     }
 
     void peerDestroyed (Peer* peer)
     {
-        SharedState::Access state (m_state);
-        state->list.erase (state->list.iterator_to (*peer));
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+        m_list.erase (m_list.iterator_to (*peer));
+        release();
     }
 
     //--------------------------------------------------------------------------
@@ -208,11 +259,11 @@ public:
             "disconnectPeer (" << address <<
             ", " << graceful << ")";
 
-        SharedState::Access state (m_state);
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
 
-        PeerByIP::iterator const it (state->ipMap.find (address));
+        PeerByIP::iterator const it (m_ipMap.find (address));
 
-        if (it != state->ipMap.end ())
+        if (it != m_ipMap.end ())
             it->second->detach ("disc", false);
     }
 
@@ -221,11 +272,11 @@ public:
         m_journal.trace <<
             "activatePeer (" << remote_address << ")";
 
-        SharedState::Access state (m_state);
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
 
-        PeerByIP::iterator const it (state->ipMap.find (remote_address));
+        PeerByIP::iterator const it (m_ipMap.find (remote_address));
 
-        if (it != state->ipMap.end ())
+        if (it != m_ipMap.end ())
             it->second->activate();
     }
 
@@ -260,14 +311,16 @@ public:
             boost::make_shared <PackedMessage> (
                 tm, protocol::mtENDPOINTS));
 
-        SharedState::Access state (m_state);
-        PeerByIP::iterator const iter (state->ipMap.find (remote_address));
-        // Address must exist!
-        check_postcondition (iter != state->ipMap.end());
-        Peer::pointer peer (iter->second);
-        // VFALCO TODO Why are we checking isConnected? That should not be needed
-        if (peer->isConnected())
-            peer->sendPacket (msg, false);
+        {
+            std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+            PeerByIP::iterator const iter (m_ipMap.find (remote_address));
+            // Address must exist!
+            check_postcondition (iter != m_ipMap.end());
+            Peer::pointer peer (iter->second);
+            // VFALCO TODO Why are we checking isConnected? That should not be needed
+            if (peer->isConnected())
+                peer->sendPacket (msg, false);
+        }
     }
 
     //--------------------------------------------------------------------------
@@ -355,17 +408,38 @@ public:
     {
     }
 
+    // Close all peer connections. If graceful is true then the peer objects
+    // will wait for pending i/o before closing the socket. No new data will
+    // be sent.
+    //
+    // The caller must hold the mutex
+    //
+    // VFALCO TODO implement the graceful flag
+    //
+    void close_all (bool graceful)
+    {
+        for (List <Peer>::iterator iter (m_list.begin ());
+            iter != m_list.end(); ++iter)
+            iter->detach ("stop", false);
+    }
+
     void onStop ()
     {
         m_resolver.stop_async();
+
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+        // Take off the extra count we added in the constructor
+        release();
+        // Close all peers
+        close_all (true);
     }
 
     void onChildrenStopped ()
     {
         m_resolver.stop ();
 
-        // VFALCO TODO Clean this up and do it right, based on sockets
-        stopped();
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+        check_stopped ();
     }
 
     //--------------------------------------------------------------------------
@@ -389,18 +463,18 @@ public:
         // First assign this peer a new short ID
         peer->setShortId(++m_nextShortId);
 
-        SharedState::Access state (m_state);
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
 
         // Now track this peer
         std::pair<PeerByShortId::iterator, bool> idResult(
-            state->shortIdMap.emplace (
+            m_shortIdMap.emplace (
                 boost::unordered::piecewise_construct,
                 boost::make_tuple (peer->getShortId()),
                 boost::make_tuple (peer)));
         check_postcondition(idResult.second);
 
         std::pair<PeerByPublicKey::iterator, bool> keyResult(
-            state->publicKeyMap.emplace (
+            m_publicKeyMap.emplace (
                 boost::unordered::piecewise_construct,
                 boost::make_tuple (peer->getNodePublic()),
                 boost::make_tuple (peer)));
@@ -422,9 +496,9 @@ public:
     */
     void onPeerDisconnect (Peer::ref peer)
     {
-        SharedState::Access state (m_state);
-        state->shortIdMap.erase (peer->getShortId ());
-        state->publicKeyMap.erase (peer->getNodePublic ());
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+        m_shortIdMap.erase (peer->getShortId ());
+        m_publicKeyMap.erase (peer->getNodePublic ());
     }
 
     /** The number of active peers on the network
@@ -433,8 +507,8 @@ public:
     */
     std::size_t size ()
     {
-        SharedState::Access state (m_state);
-        return state->publicKeyMap.size ();
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+        return m_publicKeyMap.size ();
     }
 
     // Returns information on verified peers.
@@ -447,11 +521,11 @@ public:
     {
         Peers::PeerSequence ret;
 
-        SharedState::Access state (m_state);
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
 
-        ret.reserve (state->publicKeyMap.size ());
+        ret.reserve (m_publicKeyMap.size ());
 
-        BOOST_FOREACH (PeerByPublicKey::value_type const& pair, state->publicKeyMap)
+        BOOST_FOREACH (PeerByPublicKey::value_type const& pair, m_publicKeyMap)
         {
             assert (!!pair.second);
             ret.push_back (pair.second);
@@ -462,10 +536,10 @@ public:
 
     Peer::pointer findPeerByShortID (Peer::ShortId const& id)
     {
-        SharedState::Access state (m_state);
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
         PeerByShortId::iterator const iter (
-            state->shortIdMap.find (id));
-        if (iter != state->shortIdMap.end ())
+            m_shortIdMap.find (id));
+        if (iter != m_shortIdMap.end ())
             iter->second;
         return Peer::pointer();
     }
@@ -476,32 +550,23 @@ public:
     /** Start tracking a peer */
     void addPeer (Peer::Ptr const& peer)
     {
-        SharedState::Access state (m_state);
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
 
-        std::pair<PeerByIP::iterator, bool> keyResult(
-            state->ipMap.emplace (
-                boost::unordered::piecewise_construct,
+        check_precondition (! isStopping ());
+
+        std::pair <PeerByIP::iterator, bool> result (m_ipMap.emplace (
+            boost::unordered::piecewise_construct,
                 boost::make_tuple (peer->getRemoteAddress()),
-                boost::make_tuple (peer)));
+                    boost::make_tuple (peer)));
 
-        check_postcondition(keyResult.second);
+        check_postcondition (result.second);
     }
 
     /** Stop tracking a peer */
     void removePeer (Peer::Ptr const& peer)
     {
-        SharedState::Access state (m_state);
-        state->ipMap.erase (peer->getRemoteAddress());
-    }
-
-    /** Retrieves a reference to the instance of the PeerFinder
-
-        @note This reference is valid for the lifetime of the Peers singleton,
-              which should be enough since it's only used by instances of Peer.
-    */
-    PeerFinder::Manager &getPeerFinder ()
-    {
-        return *m_peerFinder;
+        std::lock_guard <decltype(m_mutex)> lock (m_mutex);
+        m_ipMap.erase (peer->getRemoteAddress());
     }
 };
 
@@ -522,3 +587,4 @@ Peers* Peers::New (Stoppable& parent,
         resolver, io_service, ssl_context);
 }
 
+}
