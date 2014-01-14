@@ -425,8 +425,6 @@ public:
 
     void onStop ()
     {
-        m_resolver.stop_async();
-
         std::lock_guard <decltype(m_mutex)> lock (m_mutex);
         // Take off the extra count we added in the constructor
         release();
@@ -436,8 +434,6 @@ public:
 
     void onChildrenStopped ()
     {
-        m_resolver.stop ();
-
         std::lock_guard <decltype(m_mutex)> lock (m_mutex);
         check_stopped ();
     }
